@@ -1,4 +1,6 @@
 import httpx
+from functools import reduce
+import re
 
 class Client:
     def __init__(self, chromev=None):
@@ -12,17 +14,16 @@ class Client:
 
             timezone = init.json().get('t', '')
 
-            decoded_array = [int(hex_pair, 16) for hex_pair in [timezone[i:i+2] for i in range(0, len(timezone), 2)]]
-            decoded_string = []
-            for hex_value in decoded_array:
-                key_chars = [ord(char) for char in 'CSRFRDRDNKNK']
-                result = hex_value
-                for char_code in key_chars:
-                    result = result ^ char_code
-                decoded_string.append(result)
+            hexList = re.findall(".{1,2}", timezone)
+            decList = [int(hex, 16) for hex in hexList]
+            magicNumbers = [ord(char) for char in "CSRFRDRDNKNK"]
+            decodedDecList = [
+                reduce(lambda a, b: a ^ b, [number] + magicNumbers) for number in decList
+            ]
+            decodedCharList = [chr(number) for number in decodedDecList]
 
             dinfo_schema = init.headers.get('Set-Cookie').split(';')[0].split('=')[1]
-            twitch = ''.join([chr(dec_value) for dec_value in decoded_string])
+            twitch = "".join(decodedCharList)
 
             self.csrf_token = {'dinfo_schema': dinfo_schema, 'twitch': twitch}
 
@@ -34,13 +35,15 @@ class Client:
             headers = headers or {}
             headers.update({
                 'cookie': f'dinfo.schema={self.csrf_token["dinfo_schema"]}; CHROMEV={self.chromev}',
-                'Twitch': self.csrf_token.get('twitch')
+                'Twitch': self.csrf_token.get('twitch'),
+                    #garbo
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36','accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7','accept-language': 'en-US,en;q=0.9','cache-control': 'no-cache','pragma': 'no-cache','priority': 'u=0, i','sec-ch-ua': '\'Google Chrome\';v=\'125\', \'Chromium\';v=\'125\', \'Not.A/Brand\';v=\'24\'','sec-ch-ua-arch': '\'x86\'','sec-ch-ua-bitness': '\'64\'','sec-ch-ua-full-version': '\'125.0.6422.60\'','sec-ch-ua-full-version-list': '\'Google Chrome\';v=\'125.0.6422.60\', \'Chromium\';v=\'125.0.6422.60\', \'Not.A/Brand\';v=\'24.0.0.0\'','sec-ch-ua-mobile': '?0','sec-ch-ua-model': '\'\'','sec-ch-ua-platform': '\'Windows\'','sec-ch-ua-platform-version': '\'10.0.0\'','sec-fetch-dest': 'document','sec-fetch-mode': 'navigate','sec-fetch-site': 'none','sec-fetch-user': '?1','upgrade-insecure-requests': '1',
             })
 
             try:
                 response = client.request(method, url, json=json, headers=headers)
                 response.raise_for_status()
-                return response
+                return response 
 
             except httpx.HTTPStatusError as e:
                 if response.json().get('message') != None:
@@ -67,18 +70,21 @@ class Client:
 
         self.chromev = response.json().get('token')
 
-    def send_friend_request(self, username):
+    def send_friend_request(self, user, id=False): 
         if self.chromev is None:
             raise ClientException('Logging in is required for this operation.')
 
-        response = self._make_request(
-            'get',
-            f'https://apibeta.deeeep.io/users/u/{username}'
-        )
+        if not id:
+            response = self._make_request(
+                'get',
+                f'https://apibeta.deeeep.io/users/u/{user}'
+            )
+            
+            user = response.json()['id']
 
         self._make_request(
             'post',
-            f'https://apibeta.deeeep.io/friendRequests/{response.json()["id"]}'
+            f'https://apibeta.deeeep.io/friendRequests/{user}'
         )
 
     def get_friends_list(self, online: bool=False):
